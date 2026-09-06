@@ -105,6 +105,50 @@ impl Store {
             )
             .optional()
     }
+
+    pub fn finish(&self, id: i64, status: &str, actual_sec: i64, ended_at: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE sessions SET status = ?2, actual_sec = ?3, ended_at = ?4 WHERE id = ?1",
+            params![id, status, actual_sec, ended_at],
+        )?;
+        Ok(())
+    }
+
+    /// 某自然日（本地日期前缀）completed 的 actual_sec 合计
+    pub fn day_focus(&self, day: &str) -> rusqlite::Result<i64> {
+        self.conn.query_row(
+            "SELECT COALESCE(SUM(actual_sec), 0) FROM sessions
+             WHERE status = 'completed' AND substr(started_at, 1, 10) = ?1",
+            params![day],
+            |r| r.get(0),
+        )
+    }
+
+    pub fn list_today(&self, today: &str) -> rusqlite::Result<Vec<Session>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, note, note_len, planned_sec, actual_sec, started_at, ended_at, status
+             FROM sessions WHERE substr(started_at, 1, 10) = ?1 ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map(params![today], row_to_session)?;
+        rows.collect()
+    }
+
+    pub fn list_recent(&self, limit: i64) -> rusqlite::Result<Vec<Session>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, note, note_len, planned_sec, actual_sec, started_at, ended_at, status
+             FROM sessions ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], row_to_session)?;
+        rows.collect()
+    }
+
+    pub fn completed_count(&self) -> rusqlite::Result<i64> {
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM sessions WHERE status = 'completed'",
+            [],
+            |r| r.get(0),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -139,5 +183,53 @@ mod tests {
         assert!(s.get_active().unwrap().is_none());
         let a = s.insert_running("任务A", 60, "2026-09-06T09:00:00+08:00").unwrap();
         assert_eq!(s.get_active().unwrap().unwrap().id, a.id);
+    }
+
+    #[test]
+    fn finish_marks_completed_with_actual() {
+        let s = store();
+        let a = s.insert_running("任务", 60, "2026-09-06T09:00:00+08:00").unwrap();
+        s.finish(a.id, "completed", 60, "2026-09-06T09:01:00+08:00").unwrap();
+        let done = s.get(a.id).unwrap().unwrap();
+        assert_eq!(done.status, "completed");
+        assert_eq!(done.actual_sec, Some(60));
+        assert!(done.ended_at.is_some());
+        assert!(s.get_active().unwrap().is_none());
+    }
+
+    #[test]
+    fn day_focus_counts_only_completed() {
+        let s = store();
+        let a = s.insert_running("完成", 1200, "2026-09-06T09:00:00+08:00").unwrap();
+        s.finish(a.id, "completed", 1200, "2026-09-06T09:20:00+08:00").unwrap();
+        let b = s.insert_running("放弃", 600, "2026-09-06T10:00:00+08:00").unwrap();
+        s.finish(b.id, "aborted", 300, "2026-09-06T10:05:00+08:00").unwrap();
+        assert_eq!(s.day_focus("2026-09-06").unwrap(), 1200);
+        assert_eq!(s.day_focus("2026-09-05").unwrap(), 0);
+    }
+
+    #[test]
+    fn list_today_and_recent_ordering() {
+        let s = store();
+        let a = s.insert_running("早", 60, "2026-09-06T09:00:00+08:00").unwrap();
+        let b = s.insert_running("晚", 60, "2026-09-06T18:00:00+08:00").unwrap();
+        let _other = s.insert_running("昨天", 60, "2026-09-05T18:00:00+08:00").unwrap();
+        let today = s.list_today("2026-09-06").unwrap();
+        assert_eq!(today.len(), 2);
+        assert_eq!(today[0].id, b.id); // 倒序
+        let recent = s.list_recent(2).unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].id, _other.id);
+        assert_eq!(a.id, a.id);
+    }
+
+    #[test]
+    fn completed_count_counts_all_time() {
+        let s = store();
+        let a = s.insert_running("x", 60, "2026-09-01T09:00:00+08:00").unwrap();
+        s.finish(a.id, "completed", 60, "2026-09-01T09:01:00+08:00").unwrap();
+        let b = s.insert_running("y", 60, "2026-09-06T09:00:00+08:00").unwrap();
+        s.finish(b.id, "aborted", 10, "2026-09-06T09:01:00+08:00").unwrap();
+        assert_eq!(s.completed_count().unwrap(), 1);
     }
 }
