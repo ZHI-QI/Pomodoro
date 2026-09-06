@@ -2,7 +2,7 @@ use crate::models::Session;
 use rusqlite::{params, Connection, OptionalExtension};
 
 pub struct Store {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 const MIGRATIONS: &[&str] = &[
