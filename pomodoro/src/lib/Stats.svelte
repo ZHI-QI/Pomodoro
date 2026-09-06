@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import Icon from './Icon.svelte';
   import { getStats, listRecent, type SessionDto, type StatsDto } from './ipc';
 
   let stats: StatsDto | null = null;
@@ -72,17 +73,17 @@
 </script>
 
 <div class="stats">
-  <h3>📊 专注统计</h3>
+  <h3><Icon name="chart" size={15} /> 专注统计</h3>
 
   {#if stats}
     <div class="kpis">
-      <div class="kpi"><b>{hours(stats.todaySec)}</b><i>今日 · 小时</i></div>
-      <div class="kpi"><b>{hours(stats.weekSec)}</b><i>本周 · 小时</i></div>
-      <div class="kpi"><b>{stats.completedCount}</b><i>完成番茄 · 个</i></div>
+      <div class="kpi glass"><b>{hours(stats.todaySec)}</b><i>今日 · 小时</i></div>
+      <div class="kpi glass"><b>{hours(stats.weekSec)}</b><i>本周 · 小时</i></div>
+      <div class="kpi glass"><b>{stats.completedCount}</b><i>完成番茄 · 个</i></div>
     </div>
 
     <p class="lbl">最近 7 天 · 每日专注小时</p>
-    <div class="bars">
+    <div class="bars glass">
       {#each stats.byDay as d}
         <div class="col">
           <div class="bar" style="height:{Math.round((d.focusSec / maxFocus) * 100)}%" />
@@ -123,28 +124,40 @@
 
 <style>
   .stats { padding: 8px 6px; font-size: 12px; }
-  h3 { margin: 4px 0 10px; font-size: 14px; color: var(--text); }
+  h3 {
+    margin: 4px 0 10px; font-size: 14px; color: var(--text);
+    display: flex; align-items: center; gap: 6px; letter-spacing: 0.5px;
+  }
+  h3 :global(svg) { color: var(--accent2); }
   .kpis { display: flex; gap: 8px; }
-  .kpi { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px; text-align: center; }
-  .kpi b { display: block; font: 700 18px/1.2 Consolas, monospace; color: var(--accent2); }
-  .kpi:nth-child(2) b { color: #818cf8; }
+  .kpi { flex: 1; padding: 10px; text-align: center; }
+  .kpi b { display: block; font: 700 clamp(16px, 4.4vw, 19px)/1.2 Consolas, monospace; color: var(--accent2); }
+  .kpi:nth-child(2) b { color: var(--accent3); }
   .kpi:nth-child(3) b { color: var(--ok); }
   .kpi i { font-style: normal; font-size: 10px; color: var(--muted); }
-  .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; margin: 12px 0 6px; }
-  .bars { display: flex; align-items: flex-end; gap: 8px; height: 88px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+  .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1.2px; margin: 12px 0 6px; font-weight: 600; }
+  .bars { display: flex; align-items: flex-end; gap: 8px; height: 88px; padding: 10px; }
   .col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 4px; }
-  .bar { width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, var(--accent2), var(--accent)); }
+  .bar {
+    width: 100%; min-height: 2px; border-radius: 4px 4px 0 0;
+    background: linear-gradient(180deg, var(--accent2), var(--accent) 70%, var(--accent3));
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.35);
+    transition: height 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  }
   .col em { font-style: normal; font-size: 9px; color: var(--muted); }
-  .axis { position: relative; height: 10px; border-radius: 5px; background: var(--card); overflow: hidden; }
-  .seg { position: absolute; top: 0; height: 100%; }
+  .axis {
+    position: relative; height: 10px; border-radius: 5px;
+    background: rgba(139, 150, 173, 0.15); overflow: hidden;
+  }
+  .seg { position: absolute; top: 0; height: 100%; border-radius: 3px; box-shadow: 0 0 6px rgba(99, 102, 241, 0.3); }
   .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; font-size: 10px; color: var(--muted); }
   .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
   table { width: 100%; border-collapse: collapse; }
-  td { padding: 6px 4px; border-bottom: 1px dashed var(--border); color: var(--text); }
+  td { padding: 6px 4px; border-bottom: 1px dashed var(--glass-border); color: var(--text); }
   td.nm { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   td.mono { font: 10px Consolas, monospace; color: var(--muted); }
   .tag { font-size: 9px; padding: 2px 8px; border-radius: 999px; }
   .tag.completed { background: rgba(52, 211, 153, 0.15); color: var(--ok); }
-  .tag.aborted { background: rgba(248, 113, 113, 0.15); color: #f87171; }
-  .tag.running { background: rgba(99, 102, 241, 0.2); color: #818cf8; }
+  .tag.aborted { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
+  .tag.running { background: rgba(99, 102, 241, 0.2); color: var(--accent3); }
 </style>

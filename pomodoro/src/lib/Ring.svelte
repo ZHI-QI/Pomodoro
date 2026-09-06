@@ -3,6 +3,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+  import Icon from './Icon.svelte';
   import { getActiveSession, type AbortDto, type TickDto } from './ipc';
 
   let remaining = 0;
@@ -90,12 +91,18 @@
 >
   {#if running}
     <svg viewBox="0 0 96 96" width="96" height="96">
+      <defs>
+        <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#22d3ee" />
+          <stop offset="55%" stop-color="#6366f1" />
+          <stop offset="100%" stop-color="#a78bfa" />
+        </linearGradient>
+      </defs>
       <circle cx="48" cy="48" r={R} class="track" />
       <circle
-        cx="48"
-        cy="48"
-        r={R}
+        cx="48" cy="48" r={R}
         class="arc"
+        stroke="url(#ringGrad)"
         stroke-dasharray={C}
         stroke-dashoffset={C * (1 - progress)}
       />
@@ -105,9 +112,9 @@
       <i>{noteShort}</i>
     </div>
   {:else if done}
-    <div class="center ok"><b>✔ 完成</b></div>
+    <span class="done-ic"><Icon name="check" size={26} /></span>
   {:else}
-    <div class="center"><b>＋</b></div>
+    <span class="plus-ic"><Icon name="plus" size={26} /></span>
   {/if}
 </div>
 
@@ -118,18 +125,26 @@
     border-radius: 50%;
     position: relative;
     cursor: pointer;
-    transition: opacity 0.2s;
-    background: transparent;
+    transition: opacity 0.25s, transform 0.2s;
+    background:
+      radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.16), transparent 52%),
+      linear-gradient(160deg, rgba(20, 28, 56, 0.88), rgba(10, 14, 32, 0.82));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      0 6px 24px rgba(2, 6, 23, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   .ring.docked { opacity: 0.2; }
   .ring.docked:hover { opacity: 1; }
   .ring:hover { transform: scale(1.08); }
-  .track { fill: rgba(15, 23, 42, 0.88); stroke: rgba(255, 255, 255, 0.1); stroke-width: 6; }
+  .track { fill: none; stroke: rgba(255, 255, 255, 0.09); stroke-width: 6; }
   .arc {
     fill: none;
-    stroke: var(--accent);
     stroke-width: 6;
     stroke-linecap: round;
+    filter: drop-shadow(0 0 5px rgba(99, 102, 241, 0.8));
     transform: rotate(-90deg);
     transform-origin: center;
     transition: stroke-dashoffset 1s linear;
@@ -143,12 +158,18 @@
     justify-content: center;
     pointer-events: none;
   }
-  .center b { font: 700 15px/1 Consolas, monospace; color: var(--text); }
-  .center i { font: 10px/1.4 'Microsoft YaHei', sans-serif; font-style: normal; color: var(--muted); max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ok b { color: var(--ok); }
+  .center b { font: 700 15px/1 Consolas, monospace; color: #e8edf7; font-variant-numeric: tabular-nums; }
+  .center i {
+    font: 10px/1.4 'Microsoft YaHei', sans-serif; font-style: normal; color: #8b96ad;
+    max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .plus-ic, .done-ic { display: flex; align-items: center; justify-content: center; }
+  .plus-ic { color: rgba(139, 150, 173, 0.85); }
+  .ring:hover .plus-ic { color: #22d3ee; }
+  .done-ic { color: #34d399; filter: drop-shadow(0 0 8px rgba(52, 211, 153, 0.6)); }
   .pulse { animation: pulse 1.2s ease-out infinite; }
   @keyframes pulse {
-    0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5); }
-    100% { box-shadow: 0 0 0 18px rgba(52, 211, 153, 0); }
+    0% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), 0 6px 24px rgba(2,6,23,0.55), 0 0 0 0 rgba(52, 211, 153, 0.5); }
+    100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), 0 6px 24px rgba(2,6,23,0.55), 0 0 0 18px rgba(52, 211, 153, 0); }
   }
 </style>
