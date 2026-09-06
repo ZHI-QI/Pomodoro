@@ -24,6 +24,17 @@ const MIGRATIONS: &[&str] = &[
     );",
 ];
 
+/// Store::open 的打开结果：
+/// - Opened   首次打开既有文件成功
+/// - Recovered 文件原本不存在/为空 → 新建空库（首次启动或丢失）
+/// - Reset    文件存在但 SQLite 拒绝 → 备份为 .corrupt-<ts> 后重建
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenOutcome {
+    Opened,
+    Recovered,
+    Reset,
+}
+
 fn row_to_session(r: &rusqlite::Row) -> rusqlite::Result<Session> {
     Ok(Session {
         id: r.get(0)?,
@@ -38,14 +49,49 @@ fn row_to_session(r: &rusqlite::Row) -> rusqlite::Result<Session> {
 }
 
 impl Store {
-    /// 打开（含损坏备份重建逻辑在任务 10 增强）；目录不存在则创建
-    pub fn open(path: &std::path::Path) -> rusqlite::Result<Self> {
+    /// 打开数据库；损坏时备份原文件并重建。
+    /// 返回 (Store, OpenOutcome) 以便上层 emit 对应事件给前端。
+    pub fn open(path: &std::path::Path) -> rusqlite::Result<(Self, OpenOutcome)> {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
+        let existed_before = path.exists();
+        match Self::try_open(path) {
+            Ok(store) => Ok((
+                store,
+                if existed_before {
+                    OpenOutcome::Opened
+                } else {
+                    OpenOutcome::Recovered
+                },
+            )),
+            Err(err) => Self::reset_after_corruption(path, &err),
+        }
+    }
+
+    fn try_open(path: &std::path::Path) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         Self::init(conn)
+    }
+
+    /// 损坏处理：rename 原文件为 data.db.corrupt-<ts>，再以新文件名打开
+    fn reset_after_corruption(
+        path: &std::path::Path,
+        err: &rusqlite::Error,
+    ) -> rusqlite::Result<(Self, OpenOutcome)> {
+        eprintln!("db open failed: {err}; backing up and resetting");
+        let ts = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
+        let backup_name = format!(
+            "{}.corrupt-{ts}",
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("data.db")
+        );
+        let backup_path = path.with_file_name(backup_name);
+        let _ = std::fs::rename(path, &backup_path);
+        let store = Self::try_open(path)?;
+        Ok((store, OpenOutcome::Reset))
     }
 
     pub fn open_in_memory() -> rusqlite::Result<Self> {
@@ -154,15 +200,22 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn store() -> Store {
         Store::open_in_memory().unwrap()
     }
 
+    fn tmp_path(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pomodoro-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join(name)
+    }
+
     #[test]
     fn migrations_are_idempotent() {
         let s = store();
-        s.get_active().unwrap(); // 不报错即表存在
+        s.get_active().unwrap();
     }
 
     #[test]
@@ -216,7 +269,7 @@ mod tests {
         let _other = s.insert_running("昨天", 60, "2026-09-05T18:00:00+08:00").unwrap();
         let today = s.list_today("2026-09-06").unwrap();
         assert_eq!(today.len(), 2);
-        assert_eq!(today[0].id, b.id); // 倒序
+        assert_eq!(today[0].id, b.id);
         let recent = s.list_recent(2).unwrap();
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].id, _other.id);
@@ -231,5 +284,57 @@ mod tests {
         let b = s.insert_running("y", 60, "2026-09-06T09:00:00+08:00").unwrap();
         s.finish(b.id, "aborted", 10, "2026-09-06T09:01:00+08:00").unwrap();
         assert_eq!(s.completed_count().unwrap(), 1);
+    }
+
+    // ───── 任务 10：OpenOutcome 相关 ─────
+
+    #[test]
+    fn open_outcome_opened_when_file_exists_and_valid() {
+        let path = tmp_path("open_ok.db");
+        let _ = std::fs::remove_file(&path);
+        // 第一次打开：文件不存在 → Recovered
+        let (_s1, o1) = Store::open(&path).unwrap();
+        assert_eq!(o1, OpenOutcome::Recovered);
+        // 第二次打开：文件已存在且有效 → Opened
+        let (_s2, o2) = Store::open(&path).unwrap();
+        assert_eq!(o2, OpenOutcome::Opened);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn open_outcome_reset_when_file_is_corrupt() {
+        let path = tmp_path("open_corrupt.db");
+        let _ = std::fs::remove_file(&path);
+        // 先正常打开，植入数据
+        {
+            let (s, o) = Store::open(&path).unwrap();
+            assert_eq!(o, OpenOutcome::Recovered);
+            s.insert_running("seed", 60, "2026-09-06T09:00:00+08:00").unwrap();
+        }
+        // 覆写为垃圾字节模拟 SQLite 损坏
+        std::fs::write(&path, b"\0\0\0garbage not a sqlite db\0\0").unwrap();
+        // 重新打开：触发备份 + 重建 → Reset
+        let (s, o) = Store::open(&path).unwrap();
+        assert_eq!(o, OpenOutcome::Reset);
+        // 新库是空的，sessions 表存在但无数据
+        assert!(s.get_active().unwrap().is_none());
+        assert_eq!(s.completed_count().unwrap(), 0);
+        // 备份文件存在且以 .corrupt- 开头
+        let dir = path.parent().unwrap();
+        let backups: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .contains("open_corrupt.db.corrupt-")
+            })
+            .collect();
+        assert!(!backups.is_empty(), "应生成 corrupt 备份");
+        // 清理
+        for b in backups {
+            let _ = std::fs::remove_file(b.path());
+        }
+        let _ = std::fs::remove_file(&path);
     }
 }
