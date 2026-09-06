@@ -1,6 +1,7 @@
 pub mod models;
 pub mod settings;
 pub mod store;
+pub mod timer;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
