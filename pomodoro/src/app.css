@@ -107,3 +107,10 @@ select option { background: var(--bg-2); color: var(--text); }
   body::before { animation: none; }
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
+
+/* ───────── Ring 悬浮窗专用：透明裁切，圆形气泡 ───────── */
+body.ring-body,
+body.ring-body::before {
+  background: transparent !important;
+  overflow: hidden;
+}

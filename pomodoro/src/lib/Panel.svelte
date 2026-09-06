@@ -30,6 +30,7 @@
   let statsOpen = false;
   let settingsOpen = false;
   let banner: string | null = null;
+  let confirmOpen = false;
 
   $: chars = noteLen(note);
   $: goalMet = chars >= GOAL;
@@ -66,7 +67,12 @@
 
   async function giveUp() {
     if (!active) return;
-    if (!confirm('确定放弃当前番茄？')) return;
+    confirmOpen = true;
+  }
+
+  async function doGiveUp() {
+    if (!active) return;
+    confirmOpen = false;
     active = await abortSession(active.id);
     await refresh();
   }
@@ -286,6 +292,27 @@
       </div>
     </div>
   {/if}
+
+  {#if confirmOpen}
+    <div
+      class="overlay"
+      role="button"
+      tabindex="-1"
+      aria-label="关闭确认弹窗"
+      transition:fade={{ duration: 160 }}
+      on:click={(e) => e.target === e.currentTarget && (confirmOpen = false)}
+      on:keydown={(e) => e.key === 'Escape' && (confirmOpen = false)}
+    >
+      <div class="confirm glass" role="dialog" aria-modal="true" transition:fly={{ y: 14, duration: 220 }}>
+        <h4>放弃当前番茄？</h4>
+        <p>本次专注将记为「已放弃」，进度不保留。</p>
+        <div class="actions">
+          <button class="cancel" on:click={() => (confirmOpen = false)}>继续专注</button>
+          <button class="crimson" on:click={doGiveUp}><Icon name="stop" size={13} /> 放弃</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </main>
 
 <style>
@@ -452,4 +479,26 @@
     from { opacity: 0; transform: translateY(18px) scale(0.97); }
     to { opacity: 1; transform: none; }
   }
+
+  /* ═══ 放弃确认弹窗 ═══ */
+  .confirm {
+    width: min(300px, calc(100vw - 40px));
+    padding: 18px;
+    text-align: center;
+  }
+  .confirm h4 { margin: 0 0 8px; font-size: 15px; color: var(--text); }
+  .confirm p { margin: 0 0 16px; font-size: 12px; color: var(--muted); }
+  .actions { display: flex; gap: 8px; }
+  .actions button {
+    flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    padding: 9px; border-radius: 10px; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .cancel { background: var(--glass-strong); border: 1px solid var(--glass-border); color: var(--text); }
+  .cancel:hover { border-color: rgba(255, 255, 255, 0.25); }
+  .crimson {
+    background: rgba(248, 113, 113, 0.12); border: 1px solid rgba(248, 113, 113, 0.4);
+    color: var(--danger);
+  }
+  .crimson:hover { background: rgba(248, 113, 113, 0.22); box-shadow: 0 0 16px rgba(248, 113, 113, 0.25); }
 </style>
