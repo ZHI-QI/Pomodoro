@@ -126,7 +126,10 @@
         await listen<{ remainingSec: number; sessionId: number }>('tick', (e) => {
           if (active && e.payload.sessionId === active.id) activeRemaining = e.payload.remainingSec;
         }),
-        await listen('session_done', refresh)
+        await listen<{ sound: boolean }>('session_done', (e) => {
+          if (e.payload.sound) new Audio('/ding.wav').play().catch(() => {});
+          refresh();
+        })
       );
     })();
     return () => offs.forEach((f) => f());
