@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod models;
 pub mod notify;
+pub mod screen;
 pub mod settings;
 pub mod store;
 pub mod timer;

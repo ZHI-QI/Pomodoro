@@ -118,6 +118,8 @@ pub fn spawn_tick(app: AppHandle, t: ActiveTimer) {
                         notify::notify_done(&app, &payload.note, payload.planned_sec);
                     }
                     let _ = app.emit("session_done", payload);
+                    // 完成番茄 → 黑屏休息 1 分钟（硬性，不可打断）
+                    crate::screen::rest_screen(crate::screen::REST_SECS);
                     break;
                 }
             }
