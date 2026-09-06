@@ -70,7 +70,9 @@ mod tests {
     fn unit_clamp_domains() {
         assert_eq!(Unit::Minute.clamp_amount(0), 1);
         assert_eq!(Unit::Minute.clamp_amount(60), 59);
+        assert_eq!(Unit::Hour.clamp_amount(0), 1);
         assert_eq!(Unit::Hour.clamp_amount(24), 23);
+        assert_eq!(Unit::Day.clamp_amount(0), 1);
         assert_eq!(Unit::Day.clamp_amount(31), 30);
         assert_eq!(Unit::Day.clamp_amount(1), 1);
     }

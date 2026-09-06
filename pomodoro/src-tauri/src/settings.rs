@@ -29,14 +29,19 @@ impl Store {
         })
     }
 
-    pub fn save_settings(&self, s: &Settings) -> rusqlite::Result<()> {
-        let json = serde_json::to_string(s).expect("settings json");
+    /// 保存设置；theme 非法值防御性归一为 "system"（与 clamp 风格一致），返回净化后的设置
+    pub fn save_settings(&self, s: &Settings) -> rusqlite::Result<Settings> {
+        let mut s = s.clone();
+        if !matches!(s.theme.as_str(), "system" | "dark" | "light") {
+            s.theme = "system".into();
+        }
+        let json = serde_json::to_string(&s).expect("settings json");
         self.conn.execute(
             "INSERT INTO settings(key, value) VALUES('app', ?1)
              ON CONFLICT(key) DO UPDATE SET value = ?1",
             params![json],
         )?;
-        Ok(())
+        Ok(s)
     }
 }
 
@@ -64,5 +69,14 @@ mod tests {
             [],
         ).unwrap();
         assert_eq!(s.get_settings().unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn invalid_theme_falls_back_to_system() {
+        let s = crate::store::Store::open_in_memory().unwrap();
+        let bad = Settings { theme: "blue".into(), sound: true, notification: true, autostart: false };
+        let sanitized = s.save_settings(&bad).unwrap();
+        assert_eq!(sanitized.theme, "system");
+        assert_eq!(s.get_settings().unwrap().theme, "system");
     }
 }

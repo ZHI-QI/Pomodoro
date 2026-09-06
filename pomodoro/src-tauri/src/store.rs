@@ -157,7 +157,7 @@ impl Store {
     pub fn finish(&self, id: i64, status: &str, actual_sec: i64, ended_at: &str) -> rusqlite::Result<()> {
         self.conn.execute(
             "UPDATE sessions SET status = ?2, actual_sec = ?3, ended_at = ?4 WHERE id = ?1",
-            params![id, status, actual_sec, ended_at],
+            params![id, status, actual_sec.max(0), ended_at],
         )?;
         Ok(())
     }
@@ -278,10 +278,21 @@ mod tests {
         let today = s.list_today("2026-09-06").unwrap();
         assert_eq!(today.len(), 2);
         assert_eq!(today[0].id, b.id);
+        assert_eq!(today[1].id, a.id);
         let recent = s.list_recent(2).unwrap();
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].id, _other.id);
-        assert_eq!(a.id, a.id);
+        assert_eq!(recent[1].id, b.id);
+    }
+
+    #[test]
+    fn finish_clamps_negative_actual_sec() {
+        let s = store();
+        let a = s.insert_running("负值", 60, "2026-09-06T09:00:00+08:00").unwrap();
+        s.finish(a.id, "completed", -5, "2026-09-06T09:01:00+08:00").unwrap();
+        let row = s.list_recent(1).unwrap().remove(0);
+        assert_eq!(row.id, a.id);
+        assert_eq!(row.actual_sec, Some(0));
     }
 
     #[test]

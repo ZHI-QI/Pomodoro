@@ -4,7 +4,7 @@
   import { listen } from '@tauri-apps/api/event';
   import Stats from './Stats.svelte';
   import Icon from './Icon.svelte';
-  import { clampAmount, LIMITS, outcomeBanner, plannedSeconds, PRESETS, UNIT_LABEL, UNITS, type Unit } from './panel';
+  import { clampAmount, LIMITS, outcomeBanner, PRESETS, UNIT_LABEL, UNITS, type Unit } from './panel';
   import { GOAL, HARD_LIMIT, noteLen } from './noteCounter';
   import {
     abortSession,
@@ -110,18 +110,20 @@
   }
 
   onMount(() => {
-    let off: (() => void) | undefined;
+    const offs: (() => void)[] = [];
     (async () => {
       settings = await getSettings();
       await initTheme(settings.theme);
       banner = outcomeBanner((await getStoreOutcome()).outcome);
       await refresh();
-      off = await listen<{ remainingSec: number; sessionId: number }>('tick', (e) => {
-        if (active && e.payload.sessionId === active.id) activeRemaining = e.payload.remainingSec;
-      });
-      await listen('session_done', refresh);
+      offs.push(
+        await listen<{ remainingSec: number; sessionId: number }>('tick', (e) => {
+          if (active && e.payload.sessionId === active.id) activeRemaining = e.payload.remainingSec;
+        }),
+        await listen('session_done', refresh)
+      );
     })();
-    return () => off?.();
+    return () => offs.forEach((f) => f());
   });
 </script>
 
@@ -209,7 +211,7 @@
             <b class="tabular">{amount} {UNIT_LABEL[unit]}</b>
             <button class="ghost-ic" aria-label="增加" on:click={() => changeAmount(1)}><Icon name="plus" size={14} /></button>
           </div>
-          <p class="hint">范围：分钟 1–59 · 小时 1–23 · 天 1–30（整数）</p>
+          <p class="hint">范围：{UNITS.map((u) => `${UNIT_LABEL[u]} ${LIMITS[u][0]}–${LIMITS[u][1]}`).join(' · ')}（整数）</p>
         {/if}
       </section>
 
@@ -270,8 +272,16 @@
   {/if}
 
   {#if statsOpen}
-    <div class="overlay" role="presentation" transition:fade={{ duration: 180 }} on:click={() => (statsOpen = false)}>
-      <div class="sheet glass" role="dialog" aria-modal="true" on:click|stopPropagation>
+    <div
+      class="overlay"
+      role="button"
+      tabindex="-1"
+      aria-label="关闭统计"
+      transition:fade={{ duration: 180 }}
+      on:click={(e) => e.target === e.currentTarget && (statsOpen = false)}
+      on:keydown={(e) => e.key === 'Escape' && (statsOpen = false)}
+    >
+      <div class="sheet glass" role="dialog" aria-modal="true">
         <Stats />
       </div>
     </div>

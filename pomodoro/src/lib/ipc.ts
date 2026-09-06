@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { Unit } from './panel';
 
-export type Unit = 'minute' | 'hour' | 'day';
+export type { Unit };
 
 export interface SessionDto {
   id: number;

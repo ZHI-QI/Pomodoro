@@ -5,6 +5,7 @@
 
   let stats: StatsDto | null = null;
   let recent: SessionDto[] = [];
+  let today = todayStr();
 
   $: maxFocus = Math.max(1, ...(stats?.byDay.map((d) => d.focusSec) ?? [1]));
   const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
@@ -33,7 +34,7 @@
   interface Seg { startPct: number; widthPct: number; color: string; name: string }
 
   // 时间轴：默认 09:00–21:00，自动扩展覆盖当天最早/最晚任务
-  $: segments = buildSegments(recent.filter((s) => s.startedAt.slice(0, 10) === todayStr()));
+  $: segments = buildSegments(recent.filter((s) => s.startedAt.slice(0, 10) === today));
 
   function todayStr(): string {
     const d = new Date();
@@ -66,9 +67,26 @@
     return { running: '运行', completed: '完成', aborted: '放弃' }[s];
   }
 
-  onMount(async () => {
+  async function load() {
+    today = todayStr();
     stats = await getStats();
     recent = await listRecent(12);
+  }
+
+  onMount(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    (async () => {
+      await load();
+      // 每 60s 轮询 + 窗口重新可见时刷新，修复跨午夜/长驻不更新
+      timer = setInterval(() => {
+        if (!stopped) load();
+      }, 60_000);
+    })();
+    return () => {
+      stopped = true;
+      if (timer) clearInterval(timer);
+    };
   });
 </script>
 

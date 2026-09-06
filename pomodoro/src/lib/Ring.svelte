@@ -86,6 +86,7 @@
   class:pulse={done}
   data-tauri-drag-region
   on:click={openPanel}
+  on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && openPanel()}
   role="button"
   tabindex="0"
 >

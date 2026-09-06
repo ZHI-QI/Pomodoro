@@ -232,15 +232,15 @@ pub fn get_store_outcome(state: State<'_, crate::AppState>) -> Result<crate::Sto
 
 #[tauri::command]
 pub fn set_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> Result<Settings, String> {
-    {
+    let sanitized = {
         let store = state.store.lock().unwrap();
-        store.save_settings(&settings).map_err(e)?;
-    }
+        store.save_settings(&settings).map_err(e)?
+    };
     use tauri_plugin_autostart::ManagerExt;
     let autolaunch = app.autolaunch();
-    let _ = if settings.autostart { autolaunch.enable() } else { autolaunch.disable() };
-    let _ = app.emit("theme_changed", settings.theme.clone());
-    Ok(settings)
+    let _ = if sanitized.autostart { autolaunch.enable() } else { autolaunch.disable() };
+    let _ = app.emit("theme_changed", sanitized.theme.clone());
+    Ok(sanitized)
 }
 
 #[cfg(test)]
