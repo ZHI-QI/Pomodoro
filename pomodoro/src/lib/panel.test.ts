@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampAmount, plannedSeconds, PRESETS } from './panel';
+import { clampAmount, outcomeBanner, plannedSeconds, PRESETS } from './panel';
 
 describe('clampAmount', () => {
   it('minute 1-59', () => {
@@ -28,5 +28,18 @@ describe('plannedSeconds', () => {
 describe('PRESETS', () => {
   it('contains spec presets', () => {
     expect(PRESETS.map((p) => p.label)).toEqual(['25分', '45分', '1时', '2时', '12时', '1天']);
+  });
+});
+
+describe('outcomeBanner', () => {
+  it('正常打开不显示横幅', () => {
+    expect(outcomeBanner('opened')).toBeNull();
+  });
+  it('恢复与重置各自给出提示文案', () => {
+    expect(outcomeBanner('recovered')).toContain('恢复');
+    expect(outcomeBanner('reset')).toContain('重置');
+  });
+  it('未知状态按正常处理', () => {
+    expect(outcomeBanner('something-else')).toBeNull();
   });
 });

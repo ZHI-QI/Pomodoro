@@ -2,12 +2,13 @@
   import { onMount } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
   import Stats from './Stats.svelte';
-  import { clampAmount, LIMITS, plannedSeconds, PRESETS, UNIT_LABEL, UNITS, type Unit } from './panel';
+  import { clampAmount, LIMITS, outcomeBanner, plannedSeconds, PRESETS, UNIT_LABEL, UNITS, type Unit } from './panel';
   import { GOAL, HARD_LIMIT, noteLen } from './noteCounter';
   import {
     abortSession,
     getActiveSession,
     getSettings,
+    getStoreOutcome,
     listToday,
     saveSettings,
     startSession,
@@ -26,6 +27,7 @@
   let settings: SettingsDto | null = null;
   let statsOpen = false;
   let settingsOpen = false;
+  let banner: string | null = null;
 
   $: chars = noteLen(note);
   $: goalMet = chars >= GOAL;
@@ -100,6 +102,7 @@
     (async () => {
       settings = await getSettings();
       await initTheme(settings.theme);
+      banner = outcomeBanner((await getStoreOutcome()).outcome);
       await refresh();
       off = await listen<{ remainingSec: number; sessionId: number }>('tick', (e) => {
         if (active && e.payload.sessionId === active.id) activeRemaining = e.payload.remainingSec;
@@ -113,6 +116,12 @@
 <svelte:window on:keydown={(e) => e.key === 'Escape' && (statsOpen = false)} />
 
 <main>
+  {#if banner}
+    <div class="banner" role="status">
+      <span>⚠ {banner}</span>
+      <button class="icon" title="关闭" on:click={() => (banner = null)}>✕</button>
+    </div>
+  {/if}
   <header>
     <b>番茄钟</b>
     <span class="spacer" />
@@ -215,6 +224,11 @@
 <style>
   main { padding: 12px 14px 20px; max-width: 340px; margin: 0 auto; }
   header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    background: var(--warn, #fbbf24); color: #422006;
+    border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; font-size: 12px;
+  }
   header b { color: var(--text); font-size: 14px; }
   .spacer { flex: 1; }
   .icon { background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 4px 8px; cursor: pointer; }

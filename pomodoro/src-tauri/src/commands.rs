@@ -31,6 +31,28 @@ pub struct DonePayload {
     pub note: String,
     pub planned_sec: i64,
     pub note_len: i64,
+    pub sound: bool,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AbortPayload {
+    pub session_id: i64,
+}
+
+/// 完成事件载荷统一入口：sound 跟随设置（规格 §2.4 提示音开关）
+pub fn build_done_payload(session: Option<&Session>, planned_sec: i64, sound: bool) -> DonePayload {
+    DonePayload {
+        session_id: session.map(|s| s.id).unwrap_or(0),
+        note: session.map(|s| s.note.clone()).unwrap_or_default(),
+        planned_sec,
+        note_len: session.map(|s| s.note_len).unwrap_or(0),
+        sound,
+    }
+}
+
+pub fn build_abort_payload(session_id: i64) -> AbortPayload {
+    AbortPayload { session_id }
 }
 
 #[derive(Serialize)]
@@ -90,13 +112,8 @@ pub fn spawn_tick(app: AppHandle, t: ActiveTimer) {
                         store.get(active.session_id).ok().flatten()
                     };
                     *state.timer.lock().unwrap() = None;
-                    let payload = DonePayload {
-                        session_id: active.session_id,
-                        note: session.as_ref().map(|s| s.note.clone()).unwrap_or_default(),
-                        planned_sec: active.planned_sec,
-                        note_len: session.as_ref().map(|s| s.note_len).unwrap_or(0),
-                    };
                     let settings = state.store.lock().unwrap().get_settings().unwrap_or_default();
+                    let payload = build_done_payload(session.as_ref(), active.planned_sec, settings.sound);
                     if settings.notification {
                         notify::notify_done(&app, &payload.note, payload.planned_sec);
                     }
@@ -134,7 +151,7 @@ pub fn start_session(
 }
 
 #[tauri::command]
-pub fn abort_session(state: State<AppState>, id: i64) -> Result<Session, String> {
+pub fn abort_session(app: AppHandle, state: State<AppState>, id: i64) -> Result<Session, String> {
     let now = Local::now();
     let actual = {
         let guard = state.timer.lock().unwrap();
@@ -145,11 +162,14 @@ pub fn abort_session(state: State<AppState>, id: i64) -> Result<Session, String>
     };
     *state.timer.lock().unwrap() = None;
     let ended = now_iso();
-    {
+    let session = {
         let store = state.store.lock().unwrap();
         store.finish(id, "aborted", actual, &ended).map_err(e)?;
-        store.get(id).map_err(e)?.ok_or_else(|| "session not found".into())
-    }
+        store.get(id).map_err(e)?.ok_or_else(|| "session not found".to_string())?
+    };
+    // 广播放弃事件，让圆环窗口复位（规格 §2.1 + 态）
+    let _ = app.emit("session_aborted", build_abort_payload(session.id));
+    Ok(session)
 }
 
 #[tauri::command]
@@ -204,6 +224,13 @@ pub fn get_settings(state: State<AppState>) -> Result<Settings, String> {
 }
 
 #[tauri::command]
+pub fn get_store_outcome(state: State<'_, crate::AppState>) -> Result<crate::StoreStatePayload, String> {
+    Ok(crate::StoreStatePayload {
+        outcome: crate::outcome_label(state.outcome),
+    })
+}
+
+#[tauri::command]
 pub fn set_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> Result<Settings, String> {
     {
         let store = state.store.lock().unwrap();
@@ -214,4 +241,37 @@ pub fn set_settings(app: AppHandle, state: State<AppState>, settings: Settings) 
     let _ = if settings.autostart { autolaunch.enable() } else { autolaunch.disable() };
     let _ = app.emit("theme_changed", settings.theme.clone());
     Ok(settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn done_payload_carries_sound_flag() {
+        let session = Session {
+            id: 7,
+            note: "写周报".into(),
+            note_len: 3,
+            planned_sec: 1500,
+            actual_sec: Some(1500),
+            started_at: "2026-09-06T09:00:00+08:00".into(),
+            ended_at: Some("2026-09-06T09:25:00+08:00".into()),
+            status: "completed".into(),
+        };
+        let mut settings = Settings::default();
+        settings.sound = false;
+        let p = build_done_payload(Some(&session), 1500, settings.sound);
+        assert_eq!(p.session_id, 7);
+        assert!(!p.sound, "sound=false 时 payload 不应触发提示音");
+        settings.sound = true;
+        let p = build_done_payload(Some(&session), 1500, settings.sound);
+        assert!(p.sound, "sound=true 时 payload 应携带提示音标记");
+    }
+
+    #[test]
+    fn abort_payload_uses_camel_case() {
+        let json = serde_json::to_string(&build_abort_payload(42)).unwrap();
+        assert_eq!(json, r#"{"sessionId":42}"#);
+    }
 }

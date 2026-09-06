@@ -39,6 +39,15 @@ export interface DoneDto {
   note: string;
   plannedSec: number;
   noteLen: number;
+  sound: boolean;
+}
+
+export interface AbortDto {
+  sessionId: number;
+}
+
+export interface StoreOutcomeDto {
+  outcome: 'opened' | 'recovered' | 'reset';
 }
 
 export const startSession = (note: string, unit: Unit, amount: number) =>
@@ -51,3 +60,4 @@ export const getStats = () => invoke<StatsDto>('get_stats');
 export const getSettings = () => invoke<SettingsDto>('get_settings');
 export const saveSettings = (settings: SettingsDto) =>
   invoke<SettingsDto>('set_settings', { settings });
+export const getStoreOutcome = () => invoke<StoreOutcomeDto>('get_store_outcome');

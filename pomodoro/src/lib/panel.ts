@@ -28,3 +28,11 @@ export function clampAmount(unit: Unit, n: number): number {
 export function plannedSeconds(unit: Unit, amount: number): number {
   return amount * SEC[unit];
 }
+
+export type StoreOutcome = 'opened' | 'recovered' | 'reset';
+
+export function outcomeBanner(outcome: string): string | null {
+  if (outcome === 'recovered') return '已从上次未退出的专注中恢复';
+  if (outcome === 'reset') return '数据库损坏，已备份并重置数据';
+  return null;
+}

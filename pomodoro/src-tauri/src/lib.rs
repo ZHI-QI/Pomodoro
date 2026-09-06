@@ -14,6 +14,8 @@ use tauri::{Emitter, Manager};
 pub struct AppState {
     pub store: Mutex<Store>,
     pub timer: Mutex<Option<timer::ActiveTimer>>,
+    /// 进程生命周期内不变：本次启动的数据库打开结果（R3：前端主动拉取展示横幅）
+    pub outcome: OpenOutcome,
 }
 
 fn db_path() -> std::path::PathBuf {
@@ -30,7 +32,7 @@ pub struct StoreStatePayload {
     pub outcome: &'static str,
 }
 
-fn outcome_label(o: OpenOutcome) -> &'static str {
+pub(crate) fn outcome_label(o: OpenOutcome) -> &'static str {
     match o {
         OpenOutcome::Opened => "opened",
         OpenOutcome::Recovered => "recovered",
@@ -57,6 +59,7 @@ pub fn run() {
         .manage(AppState {
             store: Mutex::new(store),
             timer: Mutex::new(None),
+            outcome,
         })
         .setup({
             let outcome = outcome;
@@ -81,15 +84,15 @@ pub fn run() {
             list_recent,
             get_stats,
             get_settings,
-            set_settings
+            set_settings,
+            commands::get_store_outcome
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
 /// 崩溃恢复：running 记录已过期→补完成并提醒；未过期→续跑（规格 §6）
-fn recover_running_session(app: tauri::AppHandle) {
-    let state = app.state::<AppState>();
+fn recover_running_session(app: tauri::AppHandle) {    let state = app.state::<AppState>();
     let Some(s) = state.store.lock().unwrap().get_active().ok().flatten() else {
         return;
     };
@@ -114,5 +117,23 @@ fn recover_running_session(app: tauri::AppHandle) {
             *state.timer.lock().unwrap() = Some(t.clone());
             commands::spawn_tick(app, t);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn outcome_label_maps_all_variants() {
+        assert_eq!(outcome_label(OpenOutcome::Opened), "opened");
+        assert_eq!(outcome_label(OpenOutcome::Recovered), "recovered");
+        assert_eq!(outcome_label(OpenOutcome::Reset), "reset");
+    }
+
+    #[test]
+    fn store_outcome_payload_serializes_snake_case() {
+        let json = serde_json::to_string(&StoreStatePayload { outcome: "reset" }).unwrap();
+        assert_eq!(json, r#"{"outcome":"reset"}"#);
     }
 }

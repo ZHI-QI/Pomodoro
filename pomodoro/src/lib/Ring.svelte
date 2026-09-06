@@ -3,7 +3,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
-  import { getActiveSession, type TickDto } from './ipc';
+  import { getActiveSession, type AbortDto, type TickDto } from './ipc';
 
   let remaining = 0;
   let planned = 0;
@@ -40,11 +40,18 @@
     (async () => {
       offs.push(
         await listen<TickDto>('tick', (e) => fmt(e.payload)),
-        await listen('session_done', () => {
+        await listen<{ sound: boolean }>('session_done', (e) => {
           running = false;
           done = true;
           remaining = 0;
-          new Audio('/ding.wav').play().catch(() => {});
+          if (e.payload.sound) new Audio('/ding.wav').play().catch(() => {});
+        }),
+        await listen<AbortDto>('session_aborted', () => {
+          running = false;
+          done = false;
+          remaining = 0;
+          planned = 0;
+          noteShort = '';
         })
       );
       const active = await getActiveSession();
