@@ -89,6 +89,8 @@ impl Store {
                 .unwrap_or("data.db")
         );
         let backup_path = path.with_file_name(backup_name);
+        // 清理 WAL/SHM 孤儿：避免新库在 WAL 模式下复用旧文件导致读到损坏页
+        remove_wal_shm_siblings(path);
         let _ = std::fs::rename(path, &backup_path);
         let store = Self::try_open(path)?;
         Ok((store, OpenOutcome::Reset))
@@ -195,6 +197,12 @@ impl Store {
             |r| r.get(0),
         )
     }
+}
+
+/// 清理同目录下与 db 同名的 WAL/SHM 孤儿文件（规格 §6：避免新库在 WAL 模式下读到旧页）
+fn remove_wal_shm_siblings(path: &std::path::Path) {
+    let _ = std::fs::remove_file(path.with_extension("db-wal"));
+    let _ = std::fs::remove_file(path.with_extension("db-shm"));
 }
 
 #[cfg(test)]
@@ -335,6 +343,90 @@ mod tests {
         for b in backups {
             let _ = std::fs::remove_file(b.path());
         }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn reset_cleans_up_wal_and_shm_siblings() {
+        let path = tmp_path("open_corrupt_with_wal.db");
+        let wal = path.with_extension("db-wal");
+        let shm = path.with_extension("db-shm");
+        // 清理可能的残留
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&wal);
+        let _ = std::fs::remove_file(&shm);
+        // 模拟残留 WAL/SHM：写垃圾字节到 .db / .db-wal / .db-shm
+        let garbage_wal: &[u8] = b"\0\0\0stale wal\0\0";
+        let garbage_shm: &[u8] = b"\0\0\0stale shm\0\0";
+        std::fs::write(&path, b"\0\0\0garbage not a sqlite db\0\0").unwrap();
+        std::fs::write(&wal, garbage_wal).unwrap();
+        std::fs::write(&shm, garbage_shm).unwrap();
+        assert!(path.exists());
+        assert!(wal.exists());
+        assert!(shm.exists());
+        // 触发 reset_after_corruption：删除孤儿 WAL/SHM → rename → 新建空库
+        let (s, o) = Store::open(&path).unwrap();
+        assert_eq!(o, OpenOutcome::Reset);
+        // 原 .db 被搬走（备份文件存在）
+        let dir = path.parent().unwrap();
+        let backups: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .contains("open_corrupt_with_wal.db.corrupt-")
+            })
+            .collect();
+        assert!(!backups.is_empty(), "原 .db 应被备份为 corrupt-<ts>");
+        // 孤儿 WAL/SHM 不应再含 fake 字节：reset 已清掉它们；新连接在 WAL 模式下
+        // 可能重建 .db-wal/.db-shm，但内容是 SQLite 字节而非孤儿字节。
+        // 这一断言同时覆盖了「reset 路径」与「助手函数」两个修复点。
+        if wal.exists() {
+            let content = std::fs::read(&wal).unwrap();
+            assert_ne!(content, garbage_wal, "残留 .db-wal 不应仍含孤儿字节");
+        }
+        if shm.exists() {
+            let content = std::fs::read(&shm).unwrap();
+            assert_ne!(content, garbage_shm, "残留 .db-shm 不应仍含孤儿字节");
+        }
+        // 新 .db 存在且是干净的空库
+        assert!(path.exists(), "重建的 .db 应存在");
+        assert!(s.get_active().unwrap().is_none(), "新库应为空");
+        // 再次打开：合法库 → Opened（不是 Reset），证明新库是合法的
+        let (_s2, o2) = Store::open(&path).unwrap();
+        assert_eq!(o2, OpenOutcome::Opened);
+        // 清理
+        for b in backups {
+            let _ = std::fs::remove_file(b.path());
+        }
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&wal);
+        let _ = std::fs::remove_file(&shm);
+    }
+
+    // 助手函数直测：SQLite 在 corrupt DB 的 Connection::drop 时会主动清掉 fake WAL/SHM，
+    // 导致端到端断言拿不到「残留孤儿」信号。这一测试绕过 SQLite，直接验证修复函数本身。
+    #[test]
+    fn remove_wal_shm_siblings_removes_existing_files() {
+        let path = tmp_path("wal_siblings_helper.db");
+        let wal = path.with_extension("db-wal");
+        let shm = path.with_extension("db-shm");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&wal);
+        let _ = std::fs::remove_file(&shm);
+        std::fs::write(&path, b"main db bytes").unwrap();
+        std::fs::write(&wal, b"wal bytes").unwrap();
+        std::fs::write(&shm, b"shm bytes").unwrap();
+        assert!(wal.exists());
+        assert!(shm.exists());
+        super::remove_wal_shm_siblings(&path);
+        // 主 .db 不应被触动
+        assert!(path.exists(), "主 .db 不应被清理");
+        // 孤儿 WAL/SHM 应被删除
+        assert!(!wal.exists(), "孤儿 .db-wal 应被删除");
+        assert!(!shm.exists(), "孤儿 .db-shm 应被删除");
+        // 清理
         let _ = std::fs::remove_file(&path);
     }
 }
