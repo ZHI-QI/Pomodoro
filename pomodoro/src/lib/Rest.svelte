@@ -156,8 +156,10 @@
         c.fillRect(Math.random() * W, Math.random() * H, 1, 1);
       }
     }
-    resize();
+    // 首次调用 resize 延后至所有状态变量声明之后（避免 TDZ），见文件底部
     window.addEventListener('resize', resize);
+
+    // 声明完所有状态后（下方）再首次调用 resize()，避免 seed() 访问未初始化变量（TDZ）
 
     let t = Math.random() * 1000;
     let raf = 0;
@@ -297,6 +299,7 @@
       log1('forced', 'paintNow FORCED frame (rAF stalled)');
       lastPaint = performance.now();
     }
+    resize(); // 所有状态就绪后再铺底（此前种子/黑洞变量已声明，无 TDZ）
     raf = requestAnimationFrame(frame);
     return {
       resize,
