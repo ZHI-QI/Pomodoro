@@ -23,6 +23,12 @@ pub fn debug_log(msg: String) {
     log_line(&msg);
 }
 
+/// 休息是否活跃（前端心跳轮询用，绕开事件监听不可达的问题）
+#[tauri::command]
+pub fn rest_status(state: tauri::State<crate::AppState>) -> bool {
+    *state.rest_active.lock().unwrap()
+}
+
 /// 显示全屏黑洞休息窗，REST_SECS 秒后自动淡出隐藏
 pub fn start_rest(app: &AppHandle) {
     log_line("== start_rest called ==");
@@ -36,6 +42,8 @@ pub fn start_rest(app: &AppHandle) {
         log_line("already resting, ignore duplicate");
         return;
     }
+    // 置活跃标志：前端心跳轮询该状态启动动画（不依赖事件到达）
+    *app.state::<crate::AppState>().rest_active.lock().unwrap() = true;
     if let Err(e) = app.emit("rest_start", ()) {
         log_line(&format!("ERROR: emit rest_start failed: {e}"));
     } else {
@@ -48,6 +56,16 @@ pub fn start_rest(app: &AppHandle) {
     }
     let _ = win.set_focus();
 
+    // 事件风暴：show 后多时点重发 rest_start，防单次事件丢失
+    let hs = app.clone();
+    tauri::async_runtime::spawn(async move {
+        for delay_ms in [500u64, 1500, 3000] {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            log_line(&format!("re-emit rest_start (+{delay_ms}ms)"));
+            let _ = hs.emit("rest_start", ());
+        }
+    });
+
     let h = app.clone();
     tauri::async_runtime::spawn(async move {
         // 提前 2 秒发淡出信号，前端过渡后隐藏
@@ -59,6 +77,8 @@ pub fn start_rest(app: &AppHandle) {
             let _ = w.hide();
             log_line("rest hidden");
         }
+        *h.state::<crate::AppState>().rest_active.lock().unwrap() = false;
+        log_line("rest_active=false");
     });
 }
 

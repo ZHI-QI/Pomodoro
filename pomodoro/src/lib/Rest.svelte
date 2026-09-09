@@ -39,26 +39,24 @@
     let resizeFn: (() => void) | undefined;
     let paintNow: (() => void) | undefined;
     let beginAll: (() => void) | undefined;
+    let hbId: ReturnType<typeof setInterval> | undefined;
 
     (async () => {
-      log(`Rest.svelte mounted (fix3) visibility=${document.visibilityState} size=${window.innerWidth}x${window.innerHeight}`);
-      offStart = await listen('rest_start', () => {
-        log('rest_start received');
-        beginAll?.();
-      });
-      offFade = await listen('rest_fade', () => {
-        log('rest_fade received');
-        fading = true;
-        stopTimer?.();
-      });
+      log(`Rest.svelte mounted (fix4) visibility=${document.visibilityState} size=${window.innerWidth}x${window.innerHeight}`);
 
+      // 先启动画布引擎（不依赖任何 IPC/事件；rAF 在隐藏期冻结，
+      // 显示后由心跳 paintNow 兜底恢复）
       const ctx = canvas.getContext('2d');
       log(`getContext 2d: ${ctx ? 'ok' : 'NULL'}`);
       if (ctx) {
-        const engine = startCanvas(ctx);
-        resizeFn = engine.resize;
-        paintNow = engine.paintNow;
-        cancelAnim = engine.cancel;
+        try {
+          const engine = startCanvas(ctx);
+          resizeFn = engine.resize;
+          paintNow = engine.paintNow;
+          cancelAnim = engine.cancel;
+        } catch (e) {
+          log(`ERROR: startCanvas threw: ${e}`);
+        }
       }
 
       beginAll = () => {
@@ -66,27 +64,52 @@
         started = true;
         log('beginAll: countdown + animation started');
         beginCountdown();
-        // win.show() 是异步的，rest_start 发出时窗口可能尚未真正显示，
-        // 稍后重取尺寸；心跳中也会持续校正 bitmap
+        // win.show() 是异步的，稍后重取尺寸；心跳中也会持续校正 bitmap
         setTimeout(() => resizeFn?.(), 250);
         setTimeout(() => resizeFn?.(), 900);
       };
 
-      // 心跳兜底（400ms）：
-      // ① rest_start 丢失 → 窗口已可见却未启动 → 自动启动
-      // ② 隐藏窗口期量到的尺寸为 0 / bitmap 与窗口不符 → 重铺
-      // ③ 隐藏期 rAF 被冻结且显示后不恢复 → 强制同步帧（2.5fps 兜底，保证可见）
-      const hb = setInterval(() => {
+      // 心跳（400ms）无条件启动：
+      // ① 轮询后端 rest_status（invoke 通道），true 且未启动 → 自动启动（主通道，不依赖事件）
+      // ② 持续校正 bitmap 尺寸
+      // ③ rAF 冻结兜底：超 1.1s 未产帧则强制同步帧
+      hbId = setInterval(() => {
         const visible = document.visibilityState === 'visible';
         log1('hb', `heartbeat: visible=${visible} started=${started} fading=${fading}`);
-        if (visible && !started) beginAll?.();
+        if (visible && !started) {
+          invoke('rest_status')
+            .then((active) => {
+              log1('poll', `poll rest_status -> ${active}`);
+              if (active) {
+                log('poll says active, auto beginAll');
+                beginAll?.();
+              }
+            })
+            .catch((e) => log1('pollerr', `rest_status invoke failed: ${e}`));
+        }
         if (started && !fading && visible) {
           resizeFn?.();
           paintNow?.();
         }
       }, 400);
 
-      return;
+      // 事件通道作为快速路径保留：不 await（此前 await listen 的 Promise
+      // 在 rest 窗口永不 resolve，导致其后所有代码——含心跳——从未执行）
+      log('registering listeners (no await)...');
+      listen('rest_start', () => {
+        log('rest_start received (fast path)');
+        beginAll?.();
+      })
+        .then((off) => { offStart = off; log('listen rest_start resolved ok'); })
+        .catch((e) => log(`listen rest_start failed: ${e}`));
+      listen('rest_fade', () => {
+        log('rest_fade received');
+        fading = true;
+        stopTimer?.();
+      })
+        .then((off) => { offFade = off; log('listen rest_fade resolved ok'); })
+        .catch((e) => log(`listen rest_fade failed: ${e}`));
+      log('listeners registered');
     })();
 
     return () => {
@@ -94,6 +117,7 @@
       offFade?.();
       stopTimer?.();
       cancelAnim?.();
+      if (hbId) clearInterval(hbId);
     };
   });
 

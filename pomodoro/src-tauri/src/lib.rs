@@ -17,6 +17,8 @@ pub struct AppState {
     pub timer: Mutex<Option<timer::ActiveTimer>>,
     /// 进程生命周期内不变：本次启动的数据库打开结果（R3：前端主动拉取展示横幅）
     pub outcome: OpenOutcome,
+    /// 休息窗口是否处于活跃休息中（前端轮询用，不依赖事件）
+    pub rest_active: Mutex<bool>,
 }
 
 fn db_path() -> std::path::PathBuf {
@@ -61,6 +63,7 @@ pub fn run() {
             store: Mutex::new(store),
             timer: Mutex::new(None),
             outcome,
+            rest_active: Mutex::new(false),
         })
         .setup({
             let outcome = outcome;
@@ -87,7 +90,8 @@ pub fn run() {
             get_settings,
             set_settings,
             commands::get_store_outcome,
-            rest::debug_log
+            rest::debug_log,
+            rest::rest_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
