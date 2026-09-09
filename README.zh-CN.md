@@ -34,6 +34,12 @@
 | <img src="docs/icons/database.svg" width="20"> | **数据永不离身** | 本地 SQLite 存储，无需注册登录；崩溃自动恢复，数据库损坏自动备份重建 |
 | <img src="docs/icons/sliders.svg" width="20"> | **恰到好处的设置** | 提示音 / 系统通知 / 开机自启，一个不多，一个不少 |
 
+## 界面预览
+
+<div align="center">
+  <img src="docs/screenshots/panel.png" width="340" alt="番茄钟主面板 —— 极光玻璃 UI">
+</div>
+
 ## 快速开始
 
 **直接下载**：前往 [**Releases**](../../releases) 获取 `番茄钟_x.x.x_x64-setup.exe`（安装版）或 `pomodoro.exe`（绿色版，需系统 WebView2，Win11 自带）。macOS 的 `.dmg` 需在 Mac 上从源码构建。

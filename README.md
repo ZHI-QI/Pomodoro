@@ -34,6 +34,12 @@ English | [简体中文](./README.zh-CN.md)
 | <img src="docs/icons/database.svg" width="20"> | **Local-first** | SQLite storage, no sign-up; crash-safe session recovery; corrupted DB auto-backup & rebuild |
 | <img src="docs/icons/sliders.svg" width="20"> | **Just-enough settings** | Sound / system notification / launch at login — nothing more, nothing less |
 
+## Screenshot
+
+<div align="center">
+  <img src="docs/screenshots/panel.png" width="340" alt="Pomodoro panel — aurora-glass UI">
+</div>
+
 ## Quick Start
 
 **Download** from [**Releases**](../../releases): `番茄钟_x.x.x_x64-setup.exe` (Windows installer) or `pomodoro.exe` (portable, needs WebView2 bundled with Win11). macOS builds (`.dmg`) are produced from source on a Mac.
