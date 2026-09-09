@@ -86,7 +86,8 @@ pub fn run() {
             get_stats,
             get_settings,
             set_settings,
-            commands::get_store_outcome
+            commands::get_store_outcome,
+            rest::debug_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

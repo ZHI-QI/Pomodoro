@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
+  import { invoke } from '@tauri-apps/api/core';
+
+  const log = (m: string) => invoke('debug_log', { msg: m }).catch(() => {});
+  let logOnce = new Set<string>();
+  const log1 = (k: string, m: string) => { if (!logOnce.has(k)) { logOnce.add(k); log(m); } };
 
   let remain = 60;
   let fading = false;
@@ -36,13 +41,19 @@
     let beginAll: (() => void) | undefined;
 
     (async () => {
-      offStart = await listen('rest_start', () => beginAll?.());
+      log(`Rest.svelte mounted (fix3) visibility=${document.visibilityState} size=${window.innerWidth}x${window.innerHeight}`);
+      offStart = await listen('rest_start', () => {
+        log('rest_start received');
+        beginAll?.();
+      });
       offFade = await listen('rest_fade', () => {
+        log('rest_fade received');
         fading = true;
         stopTimer?.();
       });
 
       const ctx = canvas.getContext('2d');
+      log(`getContext 2d: ${ctx ? 'ok' : 'NULL'}`);
       if (ctx) {
         const engine = startCanvas(ctx);
         resizeFn = engine.resize;
@@ -53,6 +64,7 @@
       beginAll = () => {
         if (started) return;
         started = true;
+        log('beginAll: countdown + animation started');
         beginCountdown();
         // win.show() 是异步的，rest_start 发出时窗口可能尚未真正显示，
         // 稍后重取尺寸；心跳中也会持续校正 bitmap
@@ -66,6 +78,7 @@
       // ③ 隐藏期 rAF 被冻结且显示后不恢复 → 强制同步帧（2.5fps 兜底，保证可见）
       const hb = setInterval(() => {
         const visible = document.visibilityState === 'visible';
+        log1('hb', `heartbeat: visible=${visible} started=${started} fading=${fading}`);
         if (visible && !started) beginAll?.();
         if (started && !fading && visible) {
           resizeFn?.();
@@ -102,6 +115,7 @@
       canvas.height = H * dpr;
       c.setTransform(dpr, 0, 0, dpr, 0, 0);
       paintBase();
+      log1('size', `resize: canvas bitmap ${canvas.width}x${canvas.height} (W=${W} H=${H} dpr=${dpr})`);
       if (!seeded) seed(); // 首次有效尺寸时初始化黑洞/星尘/吸积盘
     };
     // 深空基底（不透明，一次性铺底）
@@ -170,6 +184,7 @@
         size: 0.8 + Math.random() * 1.8,
       }));
       seeded = true;
+      log1('seed', `seed done: RH=${RH.toFixed(1)} stars=${stars.length} disks=${disks.length}`);
     }
 
     function draw() {
@@ -245,6 +260,7 @@
     function frame() {
       if (W <= 0 || H <= 0) { raf = requestAnimationFrame(frame); return; }
       draw();
+      log1('firstframe', 'first frame painted (rAF alive)');
       lastPaint = performance.now();
       raf = requestAnimationFrame(frame);
     }
@@ -254,6 +270,7 @@
       if (W <= 0 || H <= 0) return;
       if (performance.now() - lastPaint < 1100) return; // rAF 活着，不干预
       draw();
+      log1('forced', 'paintNow FORCED frame (rAF stalled)');
       lastPaint = performance.now();
     }
     raf = requestAnimationFrame(frame);
