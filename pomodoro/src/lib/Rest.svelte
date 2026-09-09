@@ -5,26 +5,42 @@
   let remain = 60;
   let fading = false;
   let canvas: HTMLCanvasElement;
+  let stopTimer: (() => void) | undefined;
 
   interface Star { x: number; y: number; px: number; py: number; vx: number; vy: number; r: number; hue: number }
   interface Disk { ang: number; rad: number; speed: number; hue: number; size: number }
 
+  // 倒计时仅在收到 rest_start（窗口真正显示）后启动；
+  // rest 窗口随应用启动即加载 WebView，若在 onMount 启动倒计时，
+  // 等到真正休息时早已倒数完毕、fading 将动画层隐去——只剩黑屏
+  function beginCountdown() {
+    remain = 60;
+    fading = false;
+    stopTimer?.();
+    const iv = setInterval(() => {
+      remain = Math.max(0, remain - 1);
+      if (remain === 0) {
+        fading = true;
+        stopTimer?.();
+      }
+    }, 1000);
+    stopTimer = () => clearInterval(iv);
+  }
+
   onMount(() => {
     let offStart: (() => void) | undefined;
     let offFade: (() => void) | undefined;
-    let timer: ReturnType<typeof setInterval> | undefined;
 
     (async () => {
       offStart = await listen('rest_start', () => {
-        remain = 60;
-        fading = false;
+        beginCountdown();
+        // 窗口此前隐藏，rAF 可能被冻结；触发 resize 重铺底图并刷新画布尺寸
+        window.dispatchEvent(new Event('resize'));
       });
-      offFade = await listen('rest_fade', () => (fading = true));
-
-      timer = setInterval(() => {
-        remain = Math.max(0, remain - 1);
-        if (remain === 0) fading = true;
-      }, 1000);
+      offFade = await listen('rest_fade', () => {
+        fading = true;
+        stopTimer?.();
+      });
 
       startCanvas();
     })();
@@ -32,7 +48,7 @@
     return () => {
       offStart?.();
       offFade?.();
-      if (timer) clearInterval(timer);
+      stopTimer?.();
     };
   });
 
