@@ -2663,7 +2663,7 @@ dependencies = [
 
 [[package]]
 name = "pomodoro"
-version = "0.1.3"
+version = "0.1.6"
 dependencies = [
  "chrono",
  "rusqlite",
@@ -2674,7 +2674,6 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-notification",
  "tokio",
- "windows",
 ]
 
 [[package]]
