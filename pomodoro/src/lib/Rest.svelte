@@ -4,15 +4,15 @@
 
   let remain = 60;
   let fading = false;
+  let started = false;
   let canvas: HTMLCanvasElement;
   let stopTimer: (() => void) | undefined;
 
   interface Star { x: number; y: number; px: number; py: number; vx: number; vy: number; r: number; hue: number }
   interface Disk { ang: number; rad: number; speed: number; hue: number; size: number }
 
-  // 倒计时仅在收到 rest_start（窗口真正显示）后启动；
-  // rest 窗口随应用启动即加载 WebView，若在 onMount 启动倒计时，
-  // 等到真正休息时早已倒数完毕、fading 将动画层隐去——只剩黑屏
+  // 倒计时仅在休息开始后启动；rest 窗口随应用启动即加载 WebView，
+  // 若在挂载时启动倒计时，真正休息时早已倒数完毕、fading 将动画层隐去
   function beginCountdown() {
     remain = 60;
     fading = false;
@@ -30,42 +30,79 @@
   onMount(() => {
     let offStart: (() => void) | undefined;
     let offFade: (() => void) | undefined;
+    let cancelAnim: (() => void) | undefined;
+    let resizeFn: (() => void) | undefined;
+    let paintNow: (() => void) | undefined;
+    let beginAll: (() => void) | undefined;
 
     (async () => {
-      offStart = await listen('rest_start', () => {
-        beginCountdown();
-        // 窗口此前隐藏，rAF 可能被冻结；触发 resize 重铺底图并刷新画布尺寸
-        window.dispatchEvent(new Event('resize'));
-      });
+      offStart = await listen('rest_start', () => beginAll?.());
       offFade = await listen('rest_fade', () => {
         fading = true;
         stopTimer?.();
       });
 
-      startCanvas();
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const engine = startCanvas(ctx);
+        resizeFn = engine.resize;
+        paintNow = engine.paintNow;
+        cancelAnim = engine.cancel;
+      }
+
+      beginAll = () => {
+        if (started) return;
+        started = true;
+        beginCountdown();
+        // win.show() 是异步的，rest_start 发出时窗口可能尚未真正显示，
+        // 稍后重取尺寸；心跳中也会持续校正 bitmap
+        setTimeout(() => resizeFn?.(), 250);
+        setTimeout(() => resizeFn?.(), 900);
+      };
+
+      // 心跳兜底（400ms）：
+      // ① rest_start 丢失 → 窗口已可见却未启动 → 自动启动
+      // ② 隐藏窗口期量到的尺寸为 0 / bitmap 与窗口不符 → 重铺
+      // ③ 隐藏期 rAF 被冻结且显示后不恢复 → 强制同步帧（2.5fps 兜底，保证可见）
+      const hb = setInterval(() => {
+        const visible = document.visibilityState === 'visible';
+        if (visible && !started) beginAll?.();
+        if (started && !fading && visible) {
+          resizeFn?.();
+          paintNow?.();
+        }
+      }, 400);
+
+      return;
     })();
 
     return () => {
       offStart?.();
       offFade?.();
       stopTimer?.();
+      cancelAnim?.();
     };
   });
 
-  function startCanvas() {
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const c = ctx as CanvasRenderingContext2D;
+  function startCanvas(ctx: CanvasRenderingContext2D) {
+    const c = ctx;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    let W = window.innerWidth;
-    let H = window.innerHeight;
+    let W = 0;
+    let H = 0;
+    let lastPaint = performance.now();
+
     const resize = () => {
-      W = window.innerWidth;
-      H = window.innerHeight;
+      const nw = window.innerWidth;
+      const nh = window.innerHeight;
+      if (nw <= 0 || nh <= 0) return; // 窗口尚未真正显示，尺寸未知
+      if (canvas.width === nw * dpr && canvas.height === nh * dpr) return; // 已最新，避免重铺闪烁
+      W = nw;
+      H = nh;
       canvas.width = W * dpr;
       canvas.height = H * dpr;
       c.setTransform(dpr, 0, 0, dpr, 0, 0);
       paintBase();
+      if (!seeded) seed(); // 首次有效尺寸时初始化黑洞/星尘/吸积盘
     };
     // 深空基底（不透明，一次性铺底）
     function paintBase() {
@@ -84,9 +121,15 @@
     resize();
     window.addEventListener('resize', resize);
 
-    const RH = Math.min(W, H) * 0.055; // 事件视界半径
+    let t = Math.random() * 1000;
+    let raf = 0;
     const G = 2600; // 引力常数（调参）
     const N = 420;
+    let RH = 0;
+    let stars: Star[] = [];
+    let disks: Disk[] = [];
+    let seeded = false;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     const respawn = (s: Star) => {
       const edge = Math.floor(Math.random() * 4);
@@ -105,27 +148,31 @@
       s.r = 0.6 + Math.random() * 1.6;
       s.hue = 200 + Math.random() * 80;
     };
-    const stars: Star[] = Array.from({ length: N }, () => {
-      const s = { x: 0, y: 0, px: 0, py: 0, vx: 0, vy: 0, r: 1, hue: 220 };
-      respawn(s);
-      // 初始随机撒在屏内
-      s.x = Math.random() * W; s.y = Math.random() * H; s.px = s.x; s.py = s.y;
-      return s;
-    });
 
-    const disks: Disk[] = Array.from({ length: 150 }, () => ({
-      ang: Math.random() * Math.PI * 2,
-      rad: RH * (1.15 + Math.random() * 1.6),
-      speed: 0.012 + 0.02 / (1 + Math.random() * 2),
-      hue: 20 + Math.random() * 160,
-      size: 0.8 + Math.random() * 1.8,
-    }));
+    // 首次获得有效窗口尺寸时初始化粒子世界（隐藏期 W/H=0，半径无法计算）
+    function seed() {
+      RH = Math.min(W, H) * 0.055; // 事件视界半径
+      stars = Array.from({ length: N }, () => {
+        const s = { x: Math.random() * W, y: Math.random() * H, px: 0, py: 0, vx: 0, vy: 0, r: 0.6 + Math.random() * 1.6, hue: 200 + Math.random() * 80 };
+        s.px = s.x; s.py = s.y;
+        const dx = s.x - W / 2, dy = s.y - H / 2;
+        const d = Math.hypot(dx, dy) || 1;
+        const sp = 0.6 + Math.random() * 1.4;
+        s.vx = (-dy / d) * sp;
+        s.vy = (dx / d) * sp;
+        return s;
+      });
+      disks = Array.from({ length: 150 }, () => ({
+        ang: Math.random() * Math.PI * 2,
+        rad: RH * (1.15 + Math.random() * 1.6),
+        speed: 0.012 + 0.02 / (1 + Math.random() * 2),
+        hue: 20 + Math.random() * 160,
+        size: 0.8 + Math.random() * 1.8,
+      }));
+      seeded = true;
+    }
 
-    let t = Math.random() * 1000;
-    let raf = 0;
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    function frame() {
+    function draw() {
       t += reduce ? 0 : 0.16;
       // 黑洞游荡：慢速 Lissajous
       const bx = W / 2 + Math.sin(t * 0.011 + 1.2) * W * 0.27;
@@ -193,11 +240,28 @@
       c.beginPath();
       c.arc(bx, by, RH, 0, Math.PI * 2);
       c.fill();
+    }
 
+    function frame() {
+      if (W <= 0 || H <= 0) { raf = requestAnimationFrame(frame); return; }
+      draw();
+      lastPaint = performance.now();
       raf = requestAnimationFrame(frame);
     }
+    // 心跳兜底用的强制帧：rAF 若被冻结（隐藏窗口显示后未恢复），
+    // 心跳每 400ms 调用一次，保证至少 ~2.5fps 可见动画
+    function paintNow() {
+      if (W <= 0 || H <= 0) return;
+      if (performance.now() - lastPaint < 1100) return; // rAF 活着，不干预
+      draw();
+      lastPaint = performance.now();
+    }
     raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
+    return {
+      resize,
+      paintNow,
+      cancel: () => cancelAnimationFrame(raf),
+    };
   }
 </script>
 
